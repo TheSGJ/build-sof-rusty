@@ -1,0 +1,50 @@
+name: Build SOF Firmware (Docker Method)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+
+jobs:
+  build-with-docker:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout SOF source
+      uses: actions/checkout@v4
+      with:
+        repository: thesofproject/sof
+        ref: 6a18e5a8c
+        submodules: recursive
+        
+    - name: Build using SOF Docker container
+      run: |
+        # Use official SOF Docker image with toolchains pre-installed
+        docker pull ghcr.io/thesofproject/sof:latest || \
+        docker pull thesofproject/sof:latest
+        
+    - name: Build MT8186 firmware in container
+      run: |
+        docker run --rm \
+          -v $(pwd):/workspace \
+          -w /workspace \
+          ghcr.io/thesofproject/sof:latest \
+          ./scripts/xtensa-build-zephyr.sh -p mt8186 || \
+        docker run --rm \
+          -v $(pwd):/workspace \
+          -w /workspace \
+          thesofproject/sof:latest \
+          ./scripts/xtensa-build-all.sh mt8186
+          
+    - name: List build output
+      run: |
+        find . -name "*.ri" -o -name "*.tplg" | grep mt8186
+        
+    - name: Upload firmware
+      uses: actions/upload-artifact@v4
+      with:
+        name: sof-mt8186-abi-3.21.0
+        path: |
+          **/sof-mt8186*.ri
+          **/sof-mt8186*.tplg
+        if-no-files-found: warn
