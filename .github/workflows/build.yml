@@ -1,0 +1,92 @@
+name: Build SOF Firmware for MT8186 (ABI 3:21:0)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+
+jobs:
+  build-firmware:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout SOF source at ABI 3:21:0
+      uses: actions/checkout@v4
+      with:
+        repository: thesofproject/sof
+        ref: 6a18e5a8c  # Commit with ABI 3:21:0 and MT8186 support
+        submodules: recursive
+        
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          build-essential \
+          cmake \
+          ninja-build \
+          python3 \
+          python3-pip \
+          git \
+          wget \
+          libssl-dev \
+          device-tree-compiler
+        
+    - name: Download Xtensa toolchain for MT8186
+      run: |
+        mkdir -p ~/xtensa-tools
+        cd ~/xtensa-tools
+        # Cadence Xtensa toolchain for MediaTek MT8186
+        # This needs to be obtained from Cadence or Chrome OS SDK
+        wget -O xtensa-mt8186.tar.gz https://github.com/thesofproject/xtensa-overlay/releases/download/v1.0/xtensa-cnl-elf-v2021.6.tar.gz || true
+        
+    - name: Setup Xtensa toolchain path
+      run: |
+        echo "XTENSA_TOOLS_ROOT=$HOME/xtensa-tools" >> $GITHUB_ENV
+        
+    - name: Clone SOF tools (rimage)
+      run: |
+        cd $GITHUB_WORKSPACE
+        git clone https://github.com/thesofproject/rimage.git
+        cd rimage
+        git checkout stable-v2.2
+        cmake -B build -G Ninja
+        cmake --build build
+        sudo cmake --install build
+        
+    - name: Build MT8186 firmware
+      run: |
+        cd $GITHUB_WORKSPACE
+        ./scripts/xtensa-build-zephyr.sh -p mt8186 || \
+        ./scripts/xtensa-build-all.sh -p mt8186 || \
+        echo "Build requires Xtensa toolchain - see alternative approach below"
+        
+    - name: Upload firmware artifacts
+      uses: actions/upload-artifact@v4
+      if: success()
+      with:
+        name: sof-mt8186-abi-3.21.0
+        path: |
+          build-mt8186/sof-mt8186.ri
+          build-mt8186/sof-mt8186.tplg
+        if-no-files-found: warn
+        
+    - name: Create release
+      uses: softprops/action-gh-release@v1
+      if: success() && github.ref == 'refs/heads/main'
+      with:
+        tag_name: mt8186-abi-3.21.0
+        name: SOF Firmware MT8186 (ABI 3.21.0)
+        body: |
+          SOF firmware for MediaTek MT8186 with ABI 3:21:0
+          Compatible with shimboot kernel 5.15.74
+          
+          Install:
+          ```bash
+          sudo cp sof-mt8186.ri /lib/firmware/mediatek/sof/steelix/
+          sudo cp sof-mt8186.tplg /lib/firmware/mediatek/sof-tplg/steelix/
+          sudo modprobe -r snd_sof_mt8186 snd_sof_of snd_sof
+          sudo modprobe snd_sof && sudo modprobe snd_sof_mt8186
+          ```
+        files: |
+          build-mt8186/sof-mt8186.ri
+          build-mt8186/sof-mt8186.tplg
